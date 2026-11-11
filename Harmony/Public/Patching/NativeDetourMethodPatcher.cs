@@ -78,7 +78,7 @@ public class NativeDetourMethodPatcher : MethodPatcher
 
 			_replacement = replacement;
 
-			var realReplacement = triple.GetRealDetourTarget(Original, replacement);
+			var realReplacement = triple.GetRealDetourTarget(Original, replacement, AbiArgumentMap.Identity);
 			_realReplacementPin?.Dispose();
 			_realReplacementPin = triple.PinMethodIfNeeded(realReplacement);
 
