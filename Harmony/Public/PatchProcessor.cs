@@ -152,6 +152,8 @@ namespace HarmonyLib
 
 			lock (locker)
 			{
+				PatchFunctions.ThrowIfRuntimeAsync(original);
+
 				var patchInfo = original.ToPatchInfo();
 
 				patchInfo.AddPrefixes(instance.Id, prefix);

@@ -20,6 +20,18 @@ namespace HarmonyLib
 	/// <summary>Patch function helpers</summary>
 	internal static class PatchFunctions
 	{
+		/// <summary>Refuses methods that use the .NET 11 runtime-async calling convention</summary>
+		/// <param name="method">Method to inspect</param>
+		/// <exception cref="NotSupportedException">The method is runtime-async</exception>
+		///
+		internal static void ThrowIfRuntimeAsync(MethodBase method)
+		{
+			if (method is null || method is ConstructorInfo) return;
+			// MethodImplAttributes.Async does not exist in the reference assemblies of the older targets
+			if (((int)method.GetMethodImplementationFlags() & 0x2000) != 0)
+				throw new NotSupportedException($"Runtime-async methods are not supported: {method.FullDescription()}");
+		}
+
 		/// <summary>Sorts patch methods by their priority rules</summary>
 		/// <param name="original">The original method</param>
 		/// <param name="patches">Patches to sort</param>
@@ -43,6 +55,8 @@ namespace HarmonyLib
 		///
 		internal static MethodInfo UpdateWrapper(MethodBase original, PatchInfo patchInfo)
 		{
+			ThrowIfRuntimeAsync(original);
+
 			var patcher = original.GetMethodPatcher();
 			var dmd = patcher.PrepareOriginal();
 
@@ -70,6 +84,9 @@ namespace HarmonyLib
 				throw new ArgumentNullException(nameof(standin), $"{nameof(standin)}.{nameof(standin.method)} is NULL");
 			if (!standin.method.IsStatic)
 				throw new ArgumentException(nameof(standin), $"{nameof(standin)}.{nameof(standin.method)} is not static");
+
+			ThrowIfRuntimeAsync(original);
+			ThrowIfRuntimeAsync(standin.method);
 
 			var debug = standin.debug ?? false;
 			var transpilers = new List<MethodInfo>();
