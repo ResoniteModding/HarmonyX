@@ -70,6 +70,11 @@ public class NativeDetourPatches : TestLogger
 		if(target.GetMethodBody() != null)
 			Assert.Inconclusive("Math.Cos is IL implemented in current runtime");
 
+#if NET11_0_OR_GREATER
+		// MonoMod reads the native code of the MethodDesc on .NET 11, which an intrinsic method never gets
+		Assert.Inconclusive("MonoMod cannot resolve the entry point of an intrinsic method on .NET 11");
+#endif
+
 		// anti-inlining
 		var cos = Math.Cos;
 		Assert.AreEqual(1d, cos(0d));

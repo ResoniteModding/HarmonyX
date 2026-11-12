@@ -20,6 +20,38 @@ namespace HarmonyLib
 	/// <summary>Patch function helpers</summary>
 	internal static class PatchFunctions
 	{
+		/// <summary>Refuses __result parameters that a runtime-async method cannot supply</summary>
+		/// <param name="original">Method to be patched</param>
+		/// <param name="patches">Patches to validate before patch metadata is written</param>
+		///
+		internal static void ValidateRuntimeAsyncResults(MethodBase original, params HarmonyMethod[] patches)
+		{
+			if (!AccessTools.IsRuntimeAsync(original)) return;
+
+			foreach (var patch in patches)
+			{
+				var method = patch?.method;
+				if (method is null) continue;
+
+				foreach (var parameter in method.GetParameters())
+				{
+					if (parameter.Name != "__result") continue;
+
+					var parameterType = parameter.ParameterType.IsByRef
+						? parameter.ParameterType.GetElementType()
+						: parameter.ParameterType;
+					if (AccessTools.GetAwaitableType(parameterType, out _) == AccessTools.AwaitableType.None) continue;
+
+					var returnType = AccessTools.GetIlReturnType(original);
+					throw new InvalidHarmonyPatchArgumentException(
+						returnType == typeof(void)
+							? $"Runtime-async methods do not materialize their {parameterType.FullName}; remove the __result parameter"
+							: $"Runtime-async methods do not materialize their {parameterType.FullName}; declare __result as {returnType.FullName}",
+						original, method);
+				}
+			}
+		}
+
 		/// <summary>Sorts patch methods by their priority rules</summary>
 		/// <param name="original">The original method</param>
 		/// <param name="patches">Patches to sort</param>

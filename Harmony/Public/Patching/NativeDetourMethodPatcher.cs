@@ -78,7 +78,9 @@ public class NativeDetourMethodPatcher : MethodPatcher
 
 			_replacement = replacement;
 
-			var realReplacement = triple.GetRealDetourTarget(Original, replacement, AbiArgumentMap.Identity);
+			// MethodSignature seeds the patched method as a static method with the instance as its first argument
+			var argumentMap = !Original.IsStatic && replacement.IsStatic ? AbiArgumentMap.InstanceToStatic : AbiArgumentMap.Identity;
+			var realReplacement = triple.GetRealDetourTarget(Original, replacement, argumentMap);
 			_realReplacementPin?.Dispose();
 			_realReplacementPin = triple.PinMethodIfNeeded(realReplacement);
 

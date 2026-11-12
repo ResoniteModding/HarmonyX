@@ -49,7 +49,24 @@ namespace HarmonyLibTests
 		public void OutputEnvironmentVariables()
 		{
 			TestTools.Log(Environment.GetEnvironmentVariables(EnvironmentVariableTarget.Process)
-				.Cast<System.Collections.DictionaryEntry>().Join(entry => $"{entry.Key}: {entry.Value}", "\n"), indentLevelAfterNewLine: 1);
+				.Cast<System.Collections.DictionaryEntry>().Join(entry => $"{MakeSafeToLog(entry.Key)}: {MakeSafeToLog(entry.Value)}", "\n"), indentLevelAfterNewLine: 1);
+		}
+
+		// NUnit's test output pipeline decodes "\" followed by four hex digits into a single character. Windows
+		// native image folders are 32 hex digit names behind a backslash, so this both corrupts the paths and can
+		// produce a lone surrogate, which the test platform cannot transport and aborts the whole run over.
+		static string MakeSafeToLog(object value)
+		{
+			var text = value?.ToString() ?? "null";
+			var builder = new System.Text.StringBuilder(text.Length);
+			foreach (var c in text)
+				builder.Append(c switch
+				{
+					'\\' => '/',
+					>= ' ' and <= '~' => c,
+					_ => '?'
+				});
+			return builder.ToString();
 		}
 
 		[Test]
@@ -59,8 +76,8 @@ namespace HarmonyLibTests
 		public void OutputProcessInfo()
 		{
 			var process = Process.GetCurrentProcess();
-			TestTools.Log("ProcessName: " + process.ProcessName);
-			TestTools.Log("Modules:\n" + process.Modules.Cast<ProcessModule>().Join(module => $"{module.ModuleName}: {module.FileName}", "\n"));
+			TestTools.Log("ProcessName: " + MakeSafeToLog(process.ProcessName));
+			TestTools.Log("Modules:\n" + process.Modules.Cast<ProcessModule>().Join(module => $"{MakeSafeToLog(module.ModuleName)}: {MakeSafeToLog(module.FileName)}", "\n"));
 		}
 	}
 }
