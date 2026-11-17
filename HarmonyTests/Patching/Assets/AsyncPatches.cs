@@ -268,6 +268,79 @@ namespace HarmonyLibTests.Assets
 		}
 	}
 
+
+	[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.SumAsync))]
+	public static class AsyncCombinedPrefixSkipPatch
+	{
+		public static async Task<(bool, int)> Prefix()
+		{
+			AsyncTargets.Events.Add("prefix:start");
+			await Task.Yield();
+			AsyncTargets.Events.Add("prefix:end");
+			return (false, 100);
+		}
+	}
+
+	[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.SumAsync))]
+	public static class AsyncCombinedPrefixRunPatch
+	{
+		public static async Task<(bool, int)> Prefix()
+		{
+			AsyncTargets.Events.Add("prefix:start");
+			await Task.Yield();
+			AsyncTargets.Events.Add("prefix:end");
+			return (true, 0);
+		}
+	}
+
+	[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.SumValueAsync))]
+	public static class AsyncValueTaskCombinedPrefixPatch
+	{
+		public static async ValueTask<(bool, int)> Prefix()
+		{
+			await Task.Yield();
+			return (false, 200);
+		}
+	}
+
+	[HarmonyPatch(typeof(AsyncPrefixTargets), nameof(AsyncPrefixTargets.TryCheckAsync))]
+	public static class AsyncCombinedBoolPrefixPatch
+	{
+		public static async Task<(bool, bool)> Prefix()
+		{
+			await Task.Yield();
+			return (false, true);
+		}
+	}
+
+	[HarmonyPatch(typeof(AsyncPrefixTargets), nameof(AsyncPrefixTargets.BoxAsync))]
+	public static class AsyncCombinedBoxedPrefixPatch
+	{
+		public static async Task<(bool, int)> Prefix()
+		{
+			await Task.Yield();
+			return (false, 7);
+		}
+	}
+
+	public static class AsyncCombinedStringPrefix
+	{
+		public static async Task<(bool, string)> Prefix()
+		{
+			await Task.Yield();
+			return (false, "wrong");
+		}
+	}
+
+	[HarmonyPatch(typeof(AsyncPrefixTargets), nameof(AsyncPrefixTargets.DoRejectAsync))]
+	public static class AsyncCombinedVoidPrefixPatch
+	{
+		public static async Task<(bool, int)> Prefix()
+		{
+			await Task.Yield();
+			return (false, 1);
+		}
+	}
 #endif
 
 	[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.RefSumAsync))]
