@@ -57,6 +57,13 @@ public static class AsyncTargets
 		await Task.Yield();
 	}
 
+	public static async Task DoOtherAsync()
+	{
+		Events.Add("original:start");
+		await Task.Yield();
+		Events.Add("original:end");
+	}
+
 	public static async Task<T> EchoAsync<T>(T value)
 	{
 		await Task.Yield();
@@ -72,6 +79,13 @@ public static class AsyncPrefixTargets
 	public static readonly List<string> Events = new();
 
 	public static void Reset() => Events.Clear();
+
+	public static async ValueTask DoValueAsync()
+	{
+		Events.Add("original:start");
+		await Task.Yield();
+		Events.Add("original:end");
+	}
 
 	public static async Task DoRejectAsync()
 	{
