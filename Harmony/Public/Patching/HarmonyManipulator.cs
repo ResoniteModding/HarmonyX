@@ -185,9 +185,10 @@ public class HarmonyManipulator
 		}
 
 		// A prefix that can modify control flow has one of the following:
-		// * It returns a boolean
+		// * It returns a boolean (directly or through an awaitable)
 		// * It declares bool __runOriginal
 		var canModifyControlFlow = prefixes.Any(p => p.method.ReturnType == typeof(bool) ||
+		                                             IsAwaitableBoolPrefix(p.method) ||
 		                                             p.method.GetParameters()
 			                                             .Any(pp => pp.Name == RunOriginalParam &&
 			                                                        pp.ParameterType.OpenRefType() == typeof(bool)));
@@ -211,7 +212,14 @@ public class HarmonyManipulator
 			EmitCallParameter(method, PatchCallSite.Prefix, out var tmpInstanceBoxingVar, out var tmpObjectVar, out var resultRefInvoke, out var tmpBoxVars);
 			il.Emit(OpCodes.Call, method);
 
-			if (!AccessTools.IsVoid(method.ReturnType))
+			var awaitable = AccessTools.GetAwaitableType(method.ReturnType, out var awaitedType);
+			if (awaitable != AccessTools.AwaitableType.None)
+			{
+				EmitAwaitPrefix(method, awaitedType);
+				if (awaitedType == typeof(bool) && canModifyControlFlow)
+					EmitRunOriginalAnd(runOriginal);
+			}
+			else if (!AccessTools.IsVoid(method.ReturnType))
 			{
 				if (method.ReturnType != typeof(bool))
 					throw new InvalidHarmonyPatchArgumentException(
@@ -687,6 +695,22 @@ public class HarmonyManipulator
 		return true;
 	}
 
+	// Classic originals chain the returned task to their caller, so only runtime-async originals get an awaited void postfix.
+	private bool IsRuntimeAsyncVoidPostfix(MethodInfo patch)
+	{
+		if (!AccessTools.IsRuntimeAsync(original)) return false;
+		var kind = AccessTools.GetAwaitableType(patch.ReturnType, out _);
+		return kind == AccessTools.AwaitableType.Task || kind == AccessTools.AwaitableType.ValueTask;
+	}
+
+	// A runtime-async original can hand its value to a postfix that returns a new awaitable result.
+	private bool IsRuntimeAsyncValuePostfix(MethodInfo patch)
+	{
+		if (!AccessTools.IsRuntimeAsync(original)) return false;
+		var kind = AccessTools.GetAwaitableType(patch.ReturnType, out _);
+		return kind == AccessTools.AwaitableType.TaskOfT || kind == AccessTools.AwaitableType.ValueTaskOfT;
+	}
+
 	private void EmitRunOriginalAnd(VariableDefinition runOriginal)
 	{
 		// AND the current runOriginal to return value of the method (if any)
@@ -695,12 +719,77 @@ public class HarmonyManipulator
 		il.Emit(OpCodes.Stloc, runOriginal);
 	}
 
+	private static bool IsAwaitableBoolPrefix(MethodInfo patch) =>
+		AccessTools.GetAwaitableType(patch.ReturnType, out var resultType) != AccessTools.AwaitableType.None &&
+		resultType == typeof(bool);
+
+	private void EmitAwaitPrefix(MethodInfo patch, Type awaitedType)
+	{
+		// Only a runtime-async body can await without materializing a state machine, and its frame
+		// already suspends for AsyncHelpers.Await, so the prefix never blocks a thread.
+		if (!AccessTools.IsRuntimeAsync(original))
+			throw new InvalidHarmonyPatchArgumentException(
+				$"Prefix patch {patch.FullDescription()} returns {patch.ReturnType.FullName}, but only runtime-async methods can await async prefixes",
+				original, patch);
+		// An awaitable prefix either waits for completion or controls the original through a bool
+		if (awaitedType is not null && awaitedType != typeof(bool))
+		{
+			var remedy = ReturnType == typeof(void)
+				? "return `Task` or `Task<bool>`"
+				: $"return `Task`, `Task<bool>` or declare `ref Task<{ReturnType.FullName}> __result`";
+			throw new InvalidHarmonyPatchArgumentException(
+				$"Prefix patch {patch.FullDescription()} returns {patch.ReturnType.FullName}, but {original.FullDescription()} returns {ReturnType.FullName}; {remedy}",
+				original, patch);
+		}
+		EmitAwait(patch.ReturnType, patch);
+	}
+
 	// The prefix hands back a value of its own type; a value type needs boxing when the local holds a reference
 	private void EmitResultStore(Type valueType, VariableDefinition returnValueVar)
 	{
 		if (valueType.IsValueType && !ReturnType.IsValueType)
 			il.Emit(OpCodes.Box, valueType);
 		il.Emit(OpCodes.Stloc, returnValueVar);
+	}
+
+	// A postfix on a runtime-async original sees the value, so an awaitable __result is completed over it
+	private void EmitAwaitableFromValue(Type awaitableType, Type valueType)
+	{
+		switch (AccessTools.GetAwaitableType(awaitableType, out _))
+		{
+			case AccessTools.AwaitableType.TaskOfT:
+				EmitTaskFromResult(awaitableType, valueType);
+				break;
+			case AccessTools.AwaitableType.ValueTaskOfT:
+				il.Emit(OpCodes.Newobj, AccessTools.Constructor(awaitableType, [valueType]));
+				break;
+		}
+	}
+
+	private void EmitCompletedAwaitable(Type awaitableType)
+	{
+		switch (AccessTools.GetAwaitableType(awaitableType, out _))
+		{
+			case AccessTools.AwaitableType.Task:
+				il.Emit(OpCodes.Ldc_I4_1);
+				EmitTaskFromResult(awaitableType, typeof(bool));
+				break;
+			case AccessTools.AwaitableType.ValueTask:
+				var completed = il.DeclareVariable(awaitableType);
+				il.Emit(OpCodes.Ldloca, completed);
+				il.Emit(OpCodes.Initobj, awaitableType);
+				il.Emit(OpCodes.Ldloc, completed);
+				break;
+		}
+	}
+
+	private void EmitTaskFromResult(Type awaitableType, Type valueType)
+	{
+		var taskType = awaitableType.IsGenericType ? awaitableType.BaseType : awaitableType;
+		var fromResult = taskType.GetMethods(BindingFlags.Public | BindingFlags.Static)
+			.First(method => method.Name == "FromResult" && method.IsGenericMethodDefinition)
+			.MakeGenericMethod(valueType);
+		il.Emit(OpCodes.Call, fromResult);
 	}
 
 	private void EmitAwait(Type awaitableType, MethodInfo patch)
@@ -757,7 +846,8 @@ public class HarmonyManipulator
 			il.Emit(OpCodes.Stloc, runOriginalVar);
 		}
 
-		foreach (var postfix in postfixes.Where(p => p.method.ReturnType == typeof(void)))
+		// An async patch runs for its side effects, so Task/ValueTask-returning patches act as void postfixes.
+		foreach (var postfix in postfixes.Where(p => p.method.ReturnType == typeof(void) || IsRuntimeAsyncVoidPostfix(p.method)))
 		{
 			var method = postfix.method;
 			var start = il.DeclareLabel();
@@ -765,6 +855,8 @@ public class HarmonyManipulator
 
 			EmitCallParameter(method, PatchCallSite.Postfix, out var tmpInstanceBoxingVar, out var tmpObjectVar, out var resultRefInvoke, out var tmpBoxVars);
 			il.Emit(OpCodes.Call, method);
+			if (IsRuntimeAsyncVoidPostfix(method))
+				EmitAwait(method.ReturnType, method);
 
 			if (postfix.hasArgsArrayArg)
 				EmitAssignRefsFromArgsArray(variables[ArgsArrayVar]);
@@ -785,7 +877,7 @@ public class HarmonyManipulator
 
 		// If postfix returns a value, it must be chainable
 		// The first param is always the return of the previous
-		foreach (var postfix in postfixes.Where(p => p.method.ReturnType != typeof(void)))
+		foreach (var postfix in postfixes.Where(p => p.method.ReturnType != typeof(void) && !IsRuntimeAsyncVoidPostfix(p.method)))
 		{
 			var method = postfix.method;
 
@@ -802,6 +894,9 @@ public class HarmonyManipulator
 			EmitCallParameter(method, PatchCallSite.Postfix, out var tmpInstanceBoxingVar, out var tmpObjectVar, out var resultRefInvoke, out var tmpBoxVars);
 			il.Emit(OpCodes.Call, method);
 
+			if (IsRuntimeAsyncValuePostfix(method))
+				EmitAwait(method.ReturnType, method);
+
 			if (postfix.hasArgsArrayArg)
 				EmitAssignRefsFromArgsArray(variables[ArgsArrayVar]);
 
@@ -811,7 +906,9 @@ public class HarmonyManipulator
 			EmitArgUnbox(tmpBoxVars);
 
 			var firstParam = method.GetParameters().FirstOrDefault();
-			var returnedType = method.ReturnType;
+			var returnedType = IsRuntimeAsyncValuePostfix(method)
+				? AccessTools.UnwrapRuntimeAsyncReturnType(method.ReturnType)
+				: method.ReturnType;
 
 			if (firstParam == null || returnedType != firstParam.ParameterType)
 			{
@@ -954,8 +1051,12 @@ public class HarmonyManipulator
 		var originalType = original.DeclaringType;
 
 		// check for passthrough using first parameter (which must have same type as return type)
-		var allowPassthrough = site == PatchCallSite.Postfix;
-		var passthroughType = patch.ReturnType;
+		// Awaited runtime-async postfixes have no stack value for their arguments, so they never pass through
+		var allowPassthrough = site == PatchCallSite.Postfix && !IsRuntimeAsyncVoidPostfix(patch);
+		// A runtime-async original never produces the postfix's declared awaitable, so compare the unwrapped type
+		var passthroughType = allowPassthrough && AccessTools.IsRuntimeAsync(original)
+			? AccessTools.UnwrapRuntimeAsyncReturnType(patch.ReturnType)
+			: patch.ReturnType;
 		if (allowPassthrough && patch.ReturnType != typeof(void) && parametersWithRealNames.Count > 0 &&
 		    parametersWithRealNames[0].param.ParameterType == passthroughType)
 			parametersWithRealNames.RemoveRange(0, 1);
@@ -1115,6 +1216,28 @@ public class HarmonyManipulator
 							awaitableResultPatch = patch;
 						}
 						il.Emit(OpCodes.Ldloca, awaitableResultVar);
+						continue;
+					}
+
+					if (site == PatchCallSite.Postfix && !patchParam.ParameterType.IsByRef)
+					{
+						if (returnType == typeof(void))
+						{
+							if (awaitableValueType is not null)
+								throw new InvalidHarmonyPatchArgumentException(
+									$"{original.FullDescription()} returns void; remove the {ResultVar} parameter from postfix {patch.FullDescription()}",
+									original, patch);
+							EmitCompletedAwaitable(parameterType);
+							continue;
+						}
+						if (awaitableValueType is null || !awaitableValueType.IsAssignableFrom(returnType))
+							throw new InvalidHarmonyPatchArgumentException(
+								$"Cannot read {returnType.FullName} as {parameterType.FullName} in postfix {patch.FullDescription()}; declare {ResultVar} as Task<{returnType.FullName}>",
+								original, patch);
+						il.Emit(OpCodes.Ldloc, variables[ResultVar]);
+						if (returnType.IsValueType && !awaitableValueType.IsValueType)
+							il.Emit(OpCodes.Box, returnType);
+						EmitAwaitableFromValue(parameterType, awaitableValueType);
 						continue;
 					}
 
