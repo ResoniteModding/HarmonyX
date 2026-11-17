@@ -6,7 +6,18 @@ using TestLibrary;
 
 namespace HarmonyLibTests.Assets
 {
-		[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.SumAsync))]
+	[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.DoAsync))]
+	public static class AsyncTaskResultPatch
+	{
+		public static async Task Postfix(Task __result)
+		{
+			AsyncTargets.Events.Add("postfix:start");
+			await __result;
+			AsyncTargets.Events.Add("postfix:end");
+		}
+	}
+
+	[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.SumAsync))]
 	public static class AsyncValueResultPatch
 	{
 		public static void Postfix(int __result)
@@ -15,7 +26,19 @@ namespace HarmonyLibTests.Assets
 		}
 	}
 
-		[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.SumAsync))]
+	[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.SumAsync))]
+	public static class AsyncTaskOfTReturnPatch
+	{
+		public static async Task<int> Postfix(int __result)
+		{
+			AsyncTargets.Events.Add($"postfix:start:{__result}");
+			await Task.Yield();
+			AsyncTargets.Events.Add("postfix:end");
+			return __result + 5;
+		}
+	}
+
+	[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.SumAsync))]
 	public static class AsyncIntReturnPatch
 	{
 		public static int Postfix(int __result) => __result + 5;
@@ -28,7 +51,63 @@ namespace HarmonyLibTests.Assets
 		public static void Postfix(int __result) => InFlightTargets.Events.Add($"postfix:{__result}");
 	}
 
-					[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.SumAsync))]
+	[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.DoAsync))]
+	public static class AsyncBoolPrefixPatch
+	{
+		public static async Task<bool> Prefix()
+		{
+			AsyncTargets.Events.Add("prefix:start");
+			await Task.Yield();
+			AsyncTargets.Events.Add("prefix:end");
+			return false;
+		}
+	}
+
+	[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.DoAsync))]
+	public static class AsyncBoolPrefixContinuePatch
+	{
+		public static async Task<bool> Prefix()
+		{
+			AsyncTargets.Events.Add("prefix:start");
+			await Task.Yield();
+			AsyncTargets.Events.Add("prefix:end");
+			return true;
+		}
+	}
+
+	[HarmonyPatch(typeof(AsyncPrefixTargets), nameof(AsyncPrefixTargets.DoValueAsync))]
+	public static class AsyncValueTaskBoolPrefixPatch
+	{
+		public static async ValueTask<bool> Prefix()
+		{
+			AsyncPrefixTargets.Events.Add("prefix:start");
+			await Task.Yield();
+			AsyncPrefixTargets.Events.Add("prefix:end");
+			return false;
+		}
+	}
+
+	[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.DoAsync))]
+	public static class AsyncVoidPrefixPatch
+	{
+		public static async Task Prefix()
+		{
+			AsyncTargets.Events.Add("prefix:start");
+			await Task.Yield();
+			AsyncTargets.Events.Add("prefix:end");
+		}
+	}
+
+	public static class AsyncIntPrefix
+	{
+		public static async Task<int> Prefix()
+		{
+			await Task.Yield();
+			return 1;
+		}
+	}
+
+	[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.SumAsync))]
 	public static class AsyncRefTaskPrefix
 	{
 		public static bool Prefix(ref Task<int> __result)
@@ -160,7 +239,16 @@ namespace HarmonyLibTests.Assets
 		}
 	}
 
-		[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.RefSumAsync))]
+	[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.SumAsync))]
+	public static class AsyncTaskOfTResultPatch
+	{
+		public static async Task Postfix(Task<int> __result)
+		{
+			AsyncTargets.Events.Add($"postfix:result:{await __result}");
+		}
+	}
+
+	[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.RefSumAsync))]
 	public static class AsyncRefTaskOfTResultPatch
 	{
 		public static void Postfix(ref Task<int> __result)
@@ -185,12 +273,42 @@ namespace HarmonyLibTests.Assets
 	}
 
 #if NETCOREAPP
-			[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.RefSumValueAsync))]
+	[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.SumValueAsync))]
+	public static class AsyncValueTaskOfTReturnPatch
+	{
+		public static async ValueTask<int> Postfix(int __result)
+		{
+			AsyncTargets.Events.Add($"postfix:start:{__result}");
+			await Task.Yield();
+			AsyncTargets.Events.Add("postfix:end");
+			return __result + 5;
+		}
+	}
+
+	[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.SumValueAsync))]
+	public static class AsyncValueTaskOfTResultPatch
+	{
+		public static async Task Postfix(ValueTask<int> __result)
+		{
+			AsyncTargets.Events.Add($"postfix:result:{await __result}");
+		}
+	}
+
+	[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.RefSumValueAsync))]
 	public static class AsyncRefValueTaskOfTResultPatch
 	{
 		public static void Postfix(ref ValueTask<int> __result)
 		{
 			AsyncTargets.Events.Add($"postfix:result:{__result.Result}");
+		}
+	}
+
+	[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.DoValueAsync))]
+	public static class AsyncValueTaskResultPatch
+	{
+		public static void Postfix(ValueTask __result)
+		{
+			AsyncTargets.Events.Add($"postfix:completed:{__result.IsCompleted}");
 		}
 	}
 #endif

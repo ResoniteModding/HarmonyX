@@ -71,7 +71,7 @@ namespace HarmonyLibTests.Patching
 			var exception = Assert.Throws<InvalidHarmonyPatchArgumentException>(() =>
 				new Harmony("test.async.reject.awaitableref").Patch(target, postfix: new HarmonyMethod(postfix)));
 
-			StringAssert.Contains("do not materialize", exception.Message);
+			StringAssert.Contains("without ref", exception.Message);
 
 			var registered = Harmony.GetPatchInfo(target)?.Postfixes.Select(p => p.PatchMethod).ToArray() ?? [];
 			CollectionAssert.DoesNotContain(registered, postfix);
@@ -113,7 +113,25 @@ namespace HarmonyLibTests.Patching
 			}
 		}
 
-				[Test]
+		[Test]
+		public void Test_AsyncTaskOfTReturn_ReplacesValueAfterOriginal()
+		{
+			AsyncTargets.Reset();
+			var instance = new Harmony("test.async.taskoftreturn");
+			try
+			{
+				instance.PatchAll(typeof(AsyncTaskOfTReturnPatch));
+
+				Assert.AreEqual(10, AsyncTargets.SumAsync(2, 3).GetAwaiter().GetResult());
+				AssertEvents("original:start", "original:end", "postfix:start:5", "postfix:end");
+			}
+			finally
+			{
+				instance.UnpatchSelf();
+			}
+		}
+
+		[Test]
 		[Ignore("MonoMod cannot detour generic instantiations on .NET 11 (MonoMod#298, #341)")]
 		public void Test_GenericSyncMethod_DummyDetour()
 		{
@@ -197,7 +215,25 @@ namespace HarmonyLibTests.Patching
 			}
 		}
 
-				[Test]
+		[Test]
+		public void Test_AsyncValueTaskOfTReturn_ReplacesValue()
+		{
+			AsyncTargets.Reset();
+			var instance = new Harmony("test.async.valuetaskoftreturn");
+			try
+			{
+				instance.PatchAll(typeof(AsyncValueTaskOfTReturnPatch));
+
+				Assert.AreEqual(10, AsyncTargets.SumValueAsync(2, 3).GetAwaiter().GetResult());
+				CollectionAssert.Contains(AsyncTargets.Events, "postfix:end");
+			}
+			finally
+			{
+				instance.UnpatchSelf();
+			}
+		}
+
+		[Test]
 		public void Test_MethodTypeAsync_OnRuntimeAsync_IsRejected()
 		{
 			var instance = new Harmony("test.async.methodtype.reject");
@@ -208,7 +244,97 @@ namespace HarmonyLibTests.Patching
 			StringAssert.Contains("no state machine", exception.InnerException.Message);
 		}
 
-												[Test]
+		[Test]
+		public void Test_AsyncBoolPrefix_SkipsOriginal()
+		{
+			AsyncTargets.Reset();
+			var instance = new Harmony("test.async.boolprefix.skip");
+			try
+			{
+				instance.PatchAll(typeof(AsyncBoolPrefixPatch));
+
+				AsyncTargets.DoAsync().GetAwaiter().GetResult();
+
+				AssertEvents("prefix:start", "prefix:end");
+			}
+			finally
+			{
+				instance.UnpatchSelf();
+			}
+		}
+
+		[Test]
+		public void Test_AsyncBoolPrefix_RunsOriginalWhenTrue()
+		{
+			AsyncTargets.Reset();
+			var instance = new Harmony("test.async.boolprefix.run");
+			try
+			{
+				instance.PatchAll(typeof(AsyncBoolPrefixContinuePatch));
+
+				AsyncTargets.DoAsync().GetAwaiter().GetResult();
+
+				AssertEvents("prefix:start", "prefix:end", "original:start", "original:end");
+			}
+			finally
+			{
+				instance.UnpatchSelf();
+			}
+		}
+
+		[Test]
+		public void Test_AsyncValueTaskBoolPrefix_SkipsOriginal()
+		{
+			AsyncPrefixTargets.Reset();
+			var instance = new Harmony("test.async.valuetaskboolprefix.skip");
+			try
+			{
+				instance.PatchAll(typeof(AsyncValueTaskBoolPrefixPatch));
+
+				AsyncPrefixTargets.DoValueAsync().GetAwaiter().GetResult();
+
+				CollectionAssert.AreEqual(new[] { "prefix:start", "prefix:end" }, AsyncPrefixTargets.Events);
+			}
+			finally
+			{
+				instance.UnpatchSelf();
+			}
+		}
+
+		[Test]
+		public void Test_AsyncVoidPrefix_AwaitsBeforeOriginal()
+		{
+			AsyncTargets.Reset();
+			var instance = new Harmony("test.async.voidprefix");
+			try
+			{
+				instance.PatchAll(typeof(AsyncVoidPrefixPatch));
+
+				AsyncTargets.DoAsync().GetAwaiter().GetResult();
+
+				AssertEvents("prefix:start", "prefix:end", "original:start", "original:end");
+			}
+			finally
+			{
+				instance.UnpatchSelf();
+			}
+		}
+
+		[Test]
+		public void Test_AsyncIntPrefix_IsRejected()
+		{
+			var target = AccessTools.Method(typeof(AsyncPrefixTargets), nameof(AsyncPrefixTargets.DoRejectAsync));
+			var prefix = AccessTools.Method(typeof(AsyncIntPrefix), nameof(AsyncIntPrefix.Prefix));
+
+			var exception = Assert.Throws<InvalidHarmonyPatchArgumentException>(() =>
+				new Harmony("test.async.intprefix.reject").Patch(target, prefix: new HarmonyMethod(prefix)));
+
+			StringAssert.Contains("`Task<bool>`", exception.Message);
+			var registered = Harmony.GetPatchInfo(target)?.Prefixes.Select(p => p.PatchMethod).ToArray() ?? [];
+			CollectionAssert.DoesNotContain(registered, prefix);
+		}
+
+		[Test]
 		public void Test_AsyncInvalidResultPrefix_OnVoidPatchAll_RejectedBeforeRegistration()
 		{
 			var target = AccessTools.Method(typeof(AsyncPrefixTargets), nameof(AsyncPrefixTargets.DoRejectAsync));
@@ -219,7 +345,8 @@ namespace HarmonyLibTests.Patching
 			var exception = AssertRejected(() =>
 				new Harmony("test.async.invalidresult.patchall").PatchAll(typeof(AsyncInvalidResultPrefixPatch)));
 
-			StringAssert.Contains("only `bool` or `void`", exception.Message);
+			StringAssert.Contains("System.Void", exception.Message);
+			StringAssert.Contains("`Task<bool>`", exception.Message);
 			var registered = Harmony.GetPatchInfo(target)?.Prefixes.Select(p => p.PatchMethod).ToArray() ?? [];
 			CollectionAssert.DoesNotContain(registered, prefix);
 		}
@@ -318,7 +445,27 @@ namespace HarmonyLibTests.Patching
 			}
 		}
 
-				[Test]
+		[Test]
+		public void Test_AsyncBoolPrefix_OnBoolReturningOriginal_StaysControl()
+		{
+			AsyncPrefixTargets.Reset();
+			var instance = new Harmony("test.async.boolcontrol");
+			try
+			{
+				instance.PatchAll(typeof(AsyncBoolControlPrefix));
+
+				var result = AsyncPrefixTargets.TryCheckAsync(true).GetAwaiter().GetResult();
+
+				Assert.IsFalse(result);
+				CollectionAssert.AreEqual(new[] { "prefix:start", "prefix:end" }, AsyncPrefixTargets.Events);
+			}
+			finally
+			{
+				instance.UnpatchSelf();
+			}
+		}
+
+		[Test]
 		public void Test_AsyncRefTaskPrefix_BoxesResultForReferenceReturnType()
 		{
 			AsyncPrefixTargets.Reset();
@@ -402,12 +549,112 @@ namespace HarmonyLibTests.Patching
 			var exception = Assert.Throws<InvalidHarmonyPatchArgumentException>(() =>
 				new Harmony("test.async.refpostfix.reject").Patch(target, postfix: new HarmonyMethod(postfix)));
 
-			StringAssert.Contains("do not materialize", exception.Message);
+			StringAssert.Contains("without ref", exception.Message);
 			var registered = Harmony.GetPatchInfo(target)?.Postfixes.Select(p => p.PatchMethod).ToArray() ?? [];
 			CollectionAssert.DoesNotContain(registered, postfix);
 		}
 
-			// MonoMod detours the runtime-async variant too (MonoMod PR 346, addresses issue 344), so the patch
+		[Test]
+		public void Test_AwaitableResultPostfix_ReceivesValue()
+		{
+			AsyncTargets.Reset();
+			var instance = new Harmony("test.async.awaitablepostfix");
+			try
+			{
+				instance.PatchAll(typeof(AsyncTaskOfTResultPatch));
+
+				Assert.AreEqual(5, AsyncTargets.SumAsync(2, 3).GetAwaiter().GetResult());
+				CollectionAssert.Contains(AsyncTargets.Events, "postfix:result:5");
+			}
+			finally
+			{
+				instance.UnpatchSelf();
+			}
+		}
+
+		[Test]
+		public void Test_AwaitableVoidResultPostfix_ReceivesCompletedTask()
+		{
+			AsyncTargets.Reset();
+			var instance = new Harmony("test.async.awaitablevoidpostfix");
+			try
+			{
+				instance.PatchAll(typeof(AsyncTaskResultPatch));
+
+				AsyncTargets.DoAsync().GetAwaiter().GetResult();
+
+				AssertEvents("original:start", "original:end", "postfix:start", "postfix:end");
+			}
+			finally
+			{
+				instance.UnpatchSelf();
+			}
+		}
+
+		[Test]
+		public void Test_AwaitableValueTaskResultPostfix_ReceivesValue()
+		{
+			AsyncTargets.Reset();
+			var instance = new Harmony("test.async.awaitablevaluetaskpostfix");
+			try
+			{
+				instance.PatchAll(typeof(AsyncValueTaskOfTResultPatch));
+
+				Assert.AreEqual(5, AsyncTargets.SumValueAsync(2, 3).GetAwaiter().GetResult());
+				CollectionAssert.Contains(AsyncTargets.Events, "postfix:result:5");
+			}
+			finally
+			{
+				instance.UnpatchSelf();
+			}
+		}
+
+		[Test]
+		public void Test_AsyncIntPrefix_OnClassicMethod_IsRejected()
+		{
+			var target = AccessTools.Method(typeof(AsyncPatching), nameof(ClassicRejectAsync));
+			Assert.False(AccessTools.IsRuntimeAsync(target));
+			var prefix = AccessTools.Method(typeof(AsyncIntPrefix), nameof(AsyncIntPrefix.Prefix));
+
+			var exception = AssertRejected(() =>
+				new Harmony("test.async.intprefix.classic").Patch(target, prefix: new HarmonyMethod(prefix)));
+
+			StringAssert.Contains("only runtime-async methods can await async prefixes", exception.Message);
+		}
+
+		[Test]
+		public void Test_AsyncBoolPrefix_OnClassicMethod_IsRejected()
+		{
+			var target = AccessTools.Method(typeof(AsyncPatching), nameof(ClassicRejectAsync));
+			Assert.False(AccessTools.IsRuntimeAsync(target));
+			var prefix = AccessTools.Method(typeof(AsyncBoolPrefixPatch), nameof(AsyncBoolPrefixPatch.Prefix));
+
+			var exception = AssertRejected(() =>
+				new Harmony("test.async.boolprefix.classic").Patch(target, prefix: new HarmonyMethod(prefix)));
+
+			StringAssert.Contains("only runtime-async methods can await async prefixes", exception.Message);
+		}
+
+		[Test]
+		public void Test_AsyncVoidPostfix_RunsAfterOriginalCompletes()
+		{
+			AsyncTargets.Reset();
+			var instance = new Harmony("test.async.voidpostfix");
+			try
+			{
+				instance.PatchAll(typeof(RuntimeAsyncVoidPostfix));
+
+				AsyncTargets.DoOtherAsync().GetAwaiter().GetResult();
+
+				AssertEvents("original:start", "original:end", "postfix:start", "postfix:end");
+			}
+			finally
+			{
+				instance.UnpatchSelf();
+			}
+		}
+
+		// MonoMod detours the runtime-async variant too (MonoMod PR 346, addresses issue 344), so the patch
 		// must be visible to a caller whose async variant is compiled only after the patch is installed
 		[Test]
 		public void Test_OrdinaryTaskMethod_SeenByRuntimeAsyncCaller()

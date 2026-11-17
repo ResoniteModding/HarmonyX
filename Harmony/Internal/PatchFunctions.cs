@@ -78,6 +78,27 @@ namespace HarmonyLib
 					continue;
 				}
 
+				if (role == PatchRole.Postfix)
+				{
+					if (parameter.ParameterType.IsByRef)
+						throw new InvalidHarmonyPatchArgumentException(
+							$"Runtime-async methods do not materialize their {parameterType.FullName}; declare __result as {parameterType.FullName} (without ref)",
+							original, method);
+					if (returnType == typeof(void))
+					{
+						if (valueType is not null)
+							throw new InvalidHarmonyPatchArgumentException(
+								$"{original.FullDescription()} returns void; remove the __result parameter from postfix {method.FullDescription()}",
+								original, method);
+						continue;
+					}
+					if (valueType is null || !valueType.IsAssignableFrom(returnType))
+						throw new InvalidHarmonyPatchArgumentException(
+							$"Cannot read {returnType.FullName} as {parameterType.FullName} in postfix {method.FullDescription()}; declare __result as Task<{returnType.FullName}>",
+							original, method);
+					continue;
+				}
+
 				throw new InvalidHarmonyPatchArgumentException(
 					returnType == typeof(void)
 						? $"Runtime-async methods do not materialize their {parameterType.FullName}; remove the __result parameter"
@@ -90,10 +111,15 @@ namespace HarmonyLib
 		{
 			var method = prefix?.method;
 			if (method is null) return;
-			if (AccessTools.GetAwaitableType(method.ReturnType, out _) == AccessTools.AwaitableType.None) return;
+			if (AccessTools.GetAwaitableType(method.ReturnType, out var awaitedType) == AccessTools.AwaitableType.None) return;
+			if (awaitedType is null || awaitedType == typeof(bool)) return;
 
+			var returnType = AccessTools.GetIlReturnType(original);
+			var remedy = returnType == typeof(void)
+				? "return `Task` or `Task<bool>`"
+				: $"return `Task`, `Task<bool>` or declare `ref Task<{returnType.FullName}> __result`";
 			throw new InvalidHarmonyPatchArgumentException(
-				$"Prefix patch {method.FullDescription()} has return type {method.ReturnType}, but only `bool` or `void` are permitted",
+				$"Prefix patch {method.FullDescription()} returns {method.ReturnType.FullName}, but {original.FullDescription()} returns {returnType.FullName}; {remedy}",
 				original, method);
 		}
 
