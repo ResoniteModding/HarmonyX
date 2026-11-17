@@ -238,6 +238,14 @@ namespace HarmonyLib
 				{
 					try
 					{
+						// Reject invalid runtime-async patches before they reach the stored PatchInfo
+						foreach (var prefix in job.prefixes)
+							PatchFunctions.ValidateRuntimeAsyncResults(job.original, prefix, null, null);
+						foreach (var postfix in job.postfixes)
+							PatchFunctions.ValidateRuntimeAsyncResults(job.original, null, postfix, null);
+						foreach (var finalizer in job.finalizers)
+							PatchFunctions.ValidateRuntimeAsyncResults(job.original, null, null, finalizer);
+
 						var patchInfo = job.original.ToPatchInfo();
 
 						patchInfo.AddPrefixes(instance.Id, [.. job.prefixes]);
