@@ -352,6 +352,133 @@ namespace HarmonyLibTests.Patching
 		}
 
 		[Test]
+		public void Test_AsyncCombinedPrefix_SkipsOriginalAndReturnsResult()
+		{
+			AsyncTargets.Reset();
+			var instance = new Harmony("test.async.combined.skip");
+			try
+			{
+				instance.PatchAll(typeof(AsyncCombinedPrefixSkipPatch));
+
+				var result = AsyncTargets.SumAsync(2, 3).GetAwaiter().GetResult();
+
+				Assert.AreEqual(100, result);
+				CollectionAssert.AreEqual(new[] { "prefix:start", "prefix:end" }, AsyncTargets.Events);
+			}
+			finally
+			{
+				instance.UnpatchSelf();
+			}
+		}
+
+		[Test]
+		public void Test_AsyncCombinedPrefix_TrueRunsOriginal()
+		{
+			AsyncTargets.Reset();
+			var instance = new Harmony("test.async.combined.run");
+			try
+			{
+				instance.PatchAll(typeof(AsyncCombinedPrefixRunPatch));
+
+				var result = AsyncTargets.SumAsync(2, 3).GetAwaiter().GetResult();
+
+				Assert.AreEqual(5, result);
+				AssertEvents("prefix:start", "prefix:end", "original:start", "original:end");
+			}
+			finally
+			{
+				instance.UnpatchSelf();
+			}
+		}
+
+		[Test]
+		public void Test_AsyncValueTaskCombinedPrefix_ReturnsResult()
+		{
+			AsyncTargets.Reset();
+			var instance = new Harmony("test.async.combined.valuetask");
+			try
+			{
+				instance.PatchAll(typeof(AsyncValueTaskCombinedPrefixPatch));
+
+				Assert.AreEqual(200, AsyncTargets.SumValueAsync(2, 3).GetAwaiter().GetResult());
+			}
+			finally
+			{
+				instance.UnpatchSelf();
+			}
+		}
+
+		[Test]
+		public void Test_AsyncCombinedPrefix_BoxesResultForReferenceReturnType()
+		{
+			AsyncPrefixTargets.Reset();
+			var instance = new Harmony("test.async.combined.boxed");
+			try
+			{
+				instance.PatchAll(typeof(AsyncCombinedBoxedPrefixPatch));
+
+				var result = AsyncPrefixTargets.BoxAsync().GetAwaiter().GetResult();
+
+				Assert.IsInstanceOf<int>(result);
+				Assert.AreEqual(7, result);
+				CollectionAssert.DoesNotContain(AsyncPrefixTargets.Events, "original:start");
+			}
+			finally
+			{
+				instance.UnpatchSelf();
+			}
+		}
+
+		[Test]
+		public void Test_AsyncCombinedPrefix_OnBoolReturningOriginal_ControlsAndSetsResult()
+		{
+			AsyncPrefixTargets.Reset();
+			var instance = new Harmony("test.async.combined.bool");
+			try
+			{
+				instance.PatchAll(typeof(AsyncCombinedBoolPrefixPatch));
+
+				var result = AsyncPrefixTargets.TryCheckAsync(false).GetAwaiter().GetResult();
+
+				Assert.IsTrue(result);
+				CollectionAssert.DoesNotContain(AsyncPrefixTargets.Events, "original:start");
+			}
+			finally
+			{
+				instance.UnpatchSelf();
+			}
+		}
+
+		[Test]
+		public void Test_AsyncCombinedPrefix_WrongElement_IsRejected()
+		{
+			var target = AccessTools.Method(typeof(AsyncPrefixTargets), nameof(AsyncPrefixTargets.SumRejectAsync));
+			var prefix = AccessTools.Method(typeof(AsyncCombinedStringPrefix),
+				nameof(AsyncCombinedStringPrefix.Prefix));
+
+			var exception = Assert.Throws<InvalidHarmonyPatchArgumentException>(() =>
+				new Harmony("test.async.combined.string").Patch(target, prefix: new HarmonyMethod(prefix)));
+
+			StringAssert.Contains(typeof(int).FullName, exception.Message);
+			var registered = Harmony.GetPatchInfo(target)?.Prefixes.Select(p => p.PatchMethod).ToArray() ?? [];
+			CollectionAssert.DoesNotContain(registered, prefix);
+		}
+
+		[Test]
+		public void Test_AsyncCombinedPrefix_OnVoid_IsRejected()
+		{
+			var target = AccessTools.Method(typeof(AsyncPrefixTargets), nameof(AsyncPrefixTargets.DoRejectAsync));
+			var prefix = AccessTools.Method(typeof(AsyncCombinedVoidPrefixPatch),
+				nameof(AsyncCombinedVoidPrefixPatch.Prefix));
+
+			var exception = Assert.Throws<InvalidHarmonyPatchArgumentException>(() =>
+				new Harmony("test.async.combined.void").Patch(target, prefix: new HarmonyMethod(prefix)));
+
+			StringAssert.Contains("System.Void", exception.Message);
+			StringAssert.Contains("`Task<bool>`", exception.Message);
+		}
+
+		[Test]
 		public void Test_AsyncRefTaskPrefix_ReplacesResultAndSkipsOriginal()
 		{
 			AsyncTargets.Reset();

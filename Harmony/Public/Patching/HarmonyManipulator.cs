@@ -189,6 +189,7 @@ public class HarmonyManipulator
 		// * It declares bool __runOriginal
 		var canModifyControlFlow = prefixes.Any(p => p.method.ReturnType == typeof(bool) ||
 		                                             IsAwaitableBoolPrefix(p.method) ||
+		                                             IsAwaitableCombinedPrefix(p.method) ||
 		                                             p.method.GetParameters()
 			                                             .Any(pp => pp.Name == RunOriginalParam &&
 			                                                        pp.ParameterType.OpenRefType() == typeof(bool)));
@@ -218,6 +219,8 @@ public class HarmonyManipulator
 				EmitAwaitPrefix(method, awaitedType);
 				if (awaitedType == typeof(bool) && canModifyControlFlow)
 					EmitRunOriginalAnd(runOriginal);
+				else if (AccessTools.TryGetCombinedPrefixResult(awaitedType, ReturnType, out var valueType))
+					EmitCombinedPrefixResult(awaitedType, valueType, returnValueVar, runOriginal);
 			}
 			else if (!AccessTools.IsVoid(method.ReturnType))
 			{
@@ -723,6 +726,10 @@ public class HarmonyManipulator
 		AccessTools.GetAwaitableType(patch.ReturnType, out var resultType) != AccessTools.AwaitableType.None &&
 		resultType == typeof(bool);
 
+	private bool IsAwaitableCombinedPrefix(MethodInfo patch) =>
+		AccessTools.GetAwaitableType(patch.ReturnType, out var awaitedType) != AccessTools.AwaitableType.None &&
+		AccessTools.TryGetCombinedPrefixResult(awaitedType, ReturnType, out _);
+
 	private void EmitAwaitPrefix(MethodInfo patch, Type awaitedType)
 	{
 		// Only a runtime-async body can await without materializing a state machine, and its frame
@@ -731,17 +738,33 @@ public class HarmonyManipulator
 			throw new InvalidHarmonyPatchArgumentException(
 				$"Prefix patch {patch.FullDescription()} returns {patch.ReturnType.FullName}, but only runtime-async methods can await async prefixes",
 				original, patch);
-		// An awaitable prefix either waits for completion or controls the original through a bool
-		if (awaitedType is not null && awaitedType != typeof(bool))
+		// An awaitable prefix waits for completion, controls through a bool, or returns both as (bool, T)
+		if (awaitedType is not null && awaitedType != typeof(bool) &&
+		    !AccessTools.TryGetCombinedPrefixResult(awaitedType, ReturnType, out _))
 		{
 			var remedy = ReturnType == typeof(void)
 				? "return `Task` or `Task<bool>`"
-				: $"return `Task`, `Task<bool>` or declare `ref Task<{ReturnType.FullName}> __result`";
+				: $"return `Task`, `Task<bool>`, `Task<(bool, {ReturnType.FullName})>` or declare `ref Task<{ReturnType.FullName}> __result`";
 			throw new InvalidHarmonyPatchArgumentException(
 				$"Prefix patch {patch.FullDescription()} returns {patch.ReturnType.FullName}, but {original.FullDescription()} returns {ReturnType.FullName}; {remedy}",
 				original, patch);
 		}
 		EmitAwait(patch.ReturnType, patch);
+	}
+
+	private void EmitCombinedPrefixResult(Type tupleType, Type valueType, VariableDefinition returnValueVar, VariableDefinition runOriginal)
+	{
+		// `(bool, T)`: Item1 ANDs into the skip flag, Item2 becomes the result used when the original is skipped
+		var tupleVar = il.DeclareVariable(tupleType);
+		il.Emit(OpCodes.Stloc, tupleVar);
+		il.Emit(OpCodes.Ldloc, runOriginal);
+		il.Emit(OpCodes.Ldloca, tupleVar);
+		il.Emit(OpCodes.Ldfld, tupleType.GetField("Item1"));
+		il.Emit(OpCodes.And);
+		il.Emit(OpCodes.Stloc, runOriginal);
+		il.Emit(OpCodes.Ldloca, tupleVar);
+		il.Emit(OpCodes.Ldfld, tupleType.GetField("Item2"));
+		EmitResultStore(valueType, returnValueVar);
 	}
 
 	// The prefix hands back a value of its own type; a value type needs boxing when the local holds a reference

@@ -115,9 +115,11 @@ namespace HarmonyLib
 			if (awaitedType is null || awaitedType == typeof(bool)) return;
 
 			var returnType = AccessTools.GetIlReturnType(original);
+			if (AccessTools.TryGetCombinedPrefixResult(awaitedType, returnType, out _)) return;
+
 			var remedy = returnType == typeof(void)
 				? "return `Task` or `Task<bool>`"
-				: $"return `Task`, `Task<bool>` or declare `ref Task<{returnType.FullName}> __result`";
+				: $"return `Task`, `Task<bool>`, `Task<(bool, {returnType.FullName})>` or declare `ref Task<{returnType.FullName}> __result`";
 			throw new InvalidHarmonyPatchArgumentException(
 				$"Prefix patch {method.FullDescription()} returns {method.ReturnType.FullName}, but {original.FullDescription()} returns {returnType.FullName}; {remedy}",
 				original, method);

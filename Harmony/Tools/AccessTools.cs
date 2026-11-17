@@ -979,6 +979,7 @@ namespace HarmonyLib
 		private const string TaskOfTTypeName = "System.Threading.Tasks.Task`1";
 		private const string ValueTaskTypeName = "System.Threading.Tasks.ValueTask";
 		private const string ValueTaskOfTTypeName = "System.Threading.Tasks.ValueTask`1";
+		private const string ValueTupleOf2TypeName = "System.ValueTuple`2";
 
 		internal enum AwaitableType
 		{
@@ -987,6 +988,26 @@ namespace HarmonyLib
 			TaskOfT,
 			ValueTask,
 			ValueTaskOfT
+		}
+
+		/// <summary>Matches <c>System.ValueTuple&lt;bool, T&gt;</c> without referencing System.ValueTuple (absent on net35)</summary>
+		internal static bool IsCombinedPrefixTuple(Type type, out Type valueType)
+		{
+			valueType = null;
+			if (type is null || !type.IsGenericType) return false;
+			if (type.GetGenericTypeDefinition().FullName != ValueTupleOf2TypeName) return false;
+			var arguments = type.GetGenericArguments();
+			if (arguments[0] != typeof(bool)) return false;
+			valueType = arguments[1];
+			return true;
+		}
+
+		/// <summary>Returns true when an awaited tuple supplies both control and a usable result</summary>
+		internal static bool TryGetCombinedPrefixResult(Type awaitedType, Type returnType, out Type valueType)
+		{
+			valueType = null;
+			if (returnType == typeof(void)) return false;
+			return IsCombinedPrefixTuple(awaitedType, out valueType) && returnType.IsAssignableFrom(valueType);
 		}
 
 		internal static AwaitableType GetAwaitableType(Type type, out Type resultType)
