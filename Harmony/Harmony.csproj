@@ -64,7 +64,7 @@
         <!-- Reference assemblies are needed for non-Windows .NET Framework targeting builds. -->
         <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
 
-        <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All" />
+        <PackageReference Include="Microsoft.SourceLink.GitHub" Version="11.0.100" PrivateAssets="All" />
     </ItemGroup>
 
     <ItemGroup Condition="$(TargetFramework)=='netstandard2.0'">
