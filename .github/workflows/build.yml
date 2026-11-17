@@ -19,8 +19,18 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
+    - name: Restore .NET SDK cache
+      uses: actions/cache/restore@v6.1.0
+      with:
+        path: ${{ runner.temp }}/dotnet-sdks
+        key: ${{ runner.os }}-dotnet-sdks-${{ github.run_id }}
+        restore-keys: |
+          ${{ runner.os }}-dotnet-sdks-
+
     - name: Setup dotnet
       uses: actions/setup-dotnet@v4
+      env:
+        DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet-sdks
       with:
         dotnet-version: |
           3.x
@@ -31,6 +41,23 @@ jobs:
           9.x
           10.x
           11.x
+        cache: true
+        cache-dependency-path: |
+          Directory.Build.props
+          **/*.csproj
+
+    - name: Read installed SDK versions
+      id: sdk-versions
+      shell: bash
+      run: |
+        versions=$(dotnet --list-sdks | cut -d' ' -f1 | sort -V | tr '\n' '-')
+        echo "key=${versions%-}" >> "$GITHUB_OUTPUT"
+
+    - name: Save .NET SDK cache
+      uses: actions/cache/save@v6.1.0
+      with:
+        path: ${{ runner.temp }}/dotnet-sdks
+        key: ${{ runner.os }}-dotnet-sdks-${{ steps.sdk-versions.outputs.key }}
 
     - name: Log dotnet info
       run: dotnet --info
@@ -51,6 +78,10 @@ jobs:
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: '9.x'
+        cache: true
+        cache-dependency-path: |
+          Directory.Build.props
+          **/*.csproj
     
     - name: Make repo pushable
       env:
