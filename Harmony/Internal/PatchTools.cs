@@ -134,7 +134,11 @@ namespace HarmonyLib
 					case MethodType.Async:
 						if (string.IsNullOrEmpty(attr.methodName))
 							return null;
-						return AccessTools.AsyncMoveNext(AccessTools.DeclaredMethod(attr.declaringType, attr.methodName, attr.argumentTypes));
+
+						var asyncMethod = AccessTools.DeclaredMethod(attr.declaringType, attr.methodName, attr.argumentTypes);
+						if (asyncMethod is not null && AccessTools.IsRuntimeAsync(asyncMethod))
+							throw new NotSupportedException($"Runtime-async methods have no state machine; patch {asyncMethod.FullDescription()} directly");
+						return AccessTools.AsyncMoveNext(asyncMethod);
 #endif
 				}
 			}

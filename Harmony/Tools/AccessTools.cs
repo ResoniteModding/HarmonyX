@@ -682,6 +682,7 @@ namespace HarmonyLib
 		/// <summary>Gets the <see cref="IAsyncStateMachine.MoveNext"/> method of an async method's state machine</summary>
 		/// <param name="method">Async method that creates the state machine internally</param>
 		/// <returns>The internal <see cref="IAsyncStateMachine.MoveNext"/> method of the async state machine or <b>null</b> if no valid async method is detected</returns>
+		/// <remarks>Runtime-async methods have no state machine and return <b>null</b>. Patch those methods directly.</remarks>
 		///
 		public static MethodInfo AsyncMoveNext(MethodBase method)
 		{
@@ -944,6 +945,89 @@ namespace HarmonyLib
 			var constructor = methodOrConstructor as ConstructorInfo;
 			if (constructor is not null) return typeof(void);
 			return ((MethodInfo)methodOrConstructor).ReturnType;
+		}
+
+		/// <summary>Gets the type a method body leaves on the stack</summary>
+		/// <param name="method">Method to inspect</param>
+		/// <returns>The declared return type, unwrapped for runtime-async methods</returns>
+		///
+		internal static Type GetIlReturnType(MethodBase method)
+		{
+			var returnType = GetReturnedType(method);
+			return IsRuntimeAsync(method) ? UnwrapRuntimeAsyncReturnType(returnType) : returnType;
+		}
+
+		/// <summary>Returns true when the method uses the .NET 11+ runtime-async calling convention</summary>
+		/// <param name="method">Method to inspect</param>
+		/// <returns>True when the method implementation flags mark the method as runtime-async</returns>
+		///
+		public static bool IsRuntimeAsync(MethodBase method)
+		{
+			if (method is null || method is ConstructorInfo) return false;
+			try
+			{
+				// MethodImplAttributes.Async does not exist in every target framework Harmony supports
+				return (method.GetMethodImplementationFlags() & (System.Reflection.MethodImplAttributes)RuntimeAsync.AsyncIl) != 0;
+			}
+			catch
+			{
+				return false;
+			}
+		}
+
+		private const string TaskTypeName = "System.Threading.Tasks.Task";
+		private const string TaskOfTTypeName = "System.Threading.Tasks.Task`1";
+		private const string ValueTaskTypeName = "System.Threading.Tasks.ValueTask";
+		private const string ValueTaskOfTTypeName = "System.Threading.Tasks.ValueTask`1";
+
+		internal enum AwaitableType
+		{
+			None,
+			Task,
+			TaskOfT,
+			ValueTask,
+			ValueTaskOfT
+		}
+
+		internal static AwaitableType GetAwaitableType(Type type, out Type resultType)
+		{
+			resultType = null;
+			if (type is null) return AwaitableType.None;
+			if (type.FullName == TaskTypeName) return AwaitableType.Task;
+			if (type.FullName == ValueTaskTypeName) return AwaitableType.ValueTask;
+			if (!type.IsGenericType) return AwaitableType.None;
+
+			var definition = type.GetGenericTypeDefinition();
+			if (definition.FullName == TaskOfTTypeName)
+			{
+				resultType = type.GetGenericArguments()[0];
+				return AwaitableType.TaskOfT;
+			}
+			if (definition.FullName == ValueTaskOfTTypeName)
+			{
+				resultType = type.GetGenericArguments()[0];
+				return AwaitableType.ValueTaskOfT;
+			}
+			return AwaitableType.None;
+		}
+
+		/// <summary>Maps a runtime-async return type to the type the method body actually returns</summary>
+		/// <param name="returnType">Declared return type</param>
+		/// <returns>The unwrapped type: Task/ValueTask become void, Task&lt;T&gt;/ValueTask&lt;T&gt; become T</returns>
+		///
+		internal static Type UnwrapRuntimeAsyncReturnType(Type returnType)
+		{
+			switch (GetAwaitableType(returnType, out var resultType))
+			{
+				case AwaitableType.Task:
+				case AwaitableType.ValueTask:
+					return typeof(void);
+				case AwaitableType.TaskOfT:
+				case AwaitableType.ValueTaskOfT:
+					return resultType;
+				default:
+					return returnType;
+			}
 		}
 
 		/// <summary>Given a type, returns the first inner type matching a recursive search by name</summary>
