@@ -20,6 +20,83 @@ namespace HarmonyLib
 	/// <summary>Patch function helpers</summary>
 	internal static class PatchFunctions
 	{
+		/// <summary>Refuses __result parameters that a runtime-async method cannot supply</summary>
+		/// <param name="original">Method to be patched</param>
+		/// <param name="prefix">Prefix patch</param>
+		/// <param name="postfix">Postfix patch</param>
+		/// <param name="finalizer">Finalizer patch</param>
+		///
+		internal static void ValidateRuntimeAsyncResults(MethodBase original, HarmonyMethod prefix, HarmonyMethod postfix, HarmonyMethod finalizer)
+		{
+			if (!AccessTools.IsRuntimeAsync(original)) return;
+
+			ValidateRuntimeAsyncPrefix(original, prefix);
+			ValidateRuntimeAsyncResult(original, prefix?.method, PatchRole.Prefix);
+			ValidateRuntimeAsyncResult(original, postfix?.method, PatchRole.Postfix);
+			ValidateRuntimeAsyncResult(original, finalizer?.method, PatchRole.Finalizer);
+		}
+
+		enum PatchRole
+		{
+			Prefix,
+			Postfix,
+			Finalizer
+		}
+
+		static void ValidateRuntimeAsyncResult(MethodBase original, MethodInfo method, PatchRole role)
+		{
+			if (method is null) return;
+
+			var returnType = AccessTools.GetIlReturnType(original);
+			foreach (var parameter in method.GetParameters())
+			{
+				if (parameter.Name != "__result") continue;
+
+				var parameterType = parameter.ParameterType.IsByRef
+					? parameter.ParameterType.GetElementType()
+					: parameter.ParameterType;
+				if (AccessTools.GetAwaitableType(parameterType, out var valueType) == AccessTools.AwaitableType.None) continue;
+
+				if (role == PatchRole.Prefix)
+				{
+					if (!parameter.ParameterType.IsByRef)
+						throw new InvalidHarmonyPatchArgumentException(
+							$"Prefix patch {method.FullDescription()} declares __result as {parameterType.FullName}; declare it as ref {parameterType.FullName} __result",
+							original, method);
+					if (returnType == typeof(void))
+					{
+						if (valueType is not null)
+							throw new InvalidHarmonyPatchArgumentException(
+								$"{original.FullDescription()} returns void; remove the __result parameter from prefix {method.FullDescription()}",
+								original, method);
+						continue;
+					}
+					if (valueType is null || !returnType.IsAssignableFrom(valueType))
+						throw new InvalidHarmonyPatchArgumentException(
+							$"Cannot assign {parameterType.FullName} to __result of {original.FullDescription()}; declare ref Task<{returnType.FullName}> __result",
+							original, method);
+					continue;
+				}
+
+				throw new InvalidHarmonyPatchArgumentException(
+					returnType == typeof(void)
+						? $"Runtime-async methods do not materialize their {parameterType.FullName}; remove the __result parameter"
+						: $"Runtime-async methods do not materialize their {parameterType.FullName}; declare __result as {returnType.FullName}",
+					original, method);
+			}
+		}
+
+		static void ValidateRuntimeAsyncPrefix(MethodBase original, HarmonyMethod prefix)
+		{
+			var method = prefix?.method;
+			if (method is null) return;
+			if (AccessTools.GetAwaitableType(method.ReturnType, out _) == AccessTools.AwaitableType.None) return;
+
+			throw new InvalidHarmonyPatchArgumentException(
+				$"Prefix patch {method.FullDescription()} has return type {method.ReturnType}, but only `bool` or `void` are permitted",
+				original, method);
+		}
+
 		/// <summary>Sorts patch methods by their priority rules</summary>
 		/// <param name="original">The original method</param>
 		/// <param name="patches">Patches to sort</param>
