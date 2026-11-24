@@ -1,5 +1,7 @@
 #addin nuget:?package=Cake.FileHelpers&version=7.0.0
 
+using System.Threading.Tasks;
+
 var target = Argument("target", "Build");
 var nugetKey = Argument("nugetKey", "");
 var useTmpLocalNuget = Argument("useTmpLocalNuget", false);
@@ -40,15 +42,24 @@ Task("Test")
 {
     var targets = FindRegexMatchGroupInFile("./HarmonyTests/HarmonyTests.csproj", @"<TargetFrameworks>(.*)<\/TargetFrameworks>", 1, System.Text.RegularExpressions.RegexOptions.IgnoreCase).Captures[0].Value.Split(';');
 
-    foreach (var target in targets)
+    DotNetRestore("./HarmonyTests/HarmonyTests.csproj");
+
+    DotNetBuild("./HarmonyTests/HarmonyTests.csproj", new DotNetBuildSettings {
+        Configuration = "Release",
+        NoRestore = true
+    });
+
+    var parallelism = Math.Max(1, Math.Min(Environment.ProcessorCount, 4));
+    Parallel.ForEach(targets, new ParallelOptions { MaxDegreeOfParallelism = parallelism }, target =>
     {
-        Information($"Testing {target}");
         DotNetTest("./HarmonyTests/HarmonyTests.csproj", new DotNetTestSettings {
             Configuration = "Release",
             Framework = target,
+            NoBuild = true,
+            NoRestore = true,
             Verbosity = DotNetVerbosity.Normal
         });
-    }
+    });
 });
 
 Task("Publish")
