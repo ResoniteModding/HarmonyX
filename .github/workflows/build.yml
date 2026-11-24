@@ -20,6 +20,7 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Restore .NET SDK cache
+      id: sdk-cache
       uses: actions/cache/restore@v6.1.0
       with:
         path: ${{ runner.temp }}/dotnet-sdks
@@ -48,12 +49,14 @@ jobs:
 
     - name: Read installed SDK versions
       id: sdk-versions
+      if: steps.sdk-cache.outputs.cache-matched-key == ''
       shell: bash
       run: |
         versions=$(dotnet --list-sdks | cut -d' ' -f1 | sort -V | tr '\n' '-')
         echo "key=${versions%-}" >> "$GITHUB_OUTPUT"
 
     - name: Save .NET SDK cache
+      if: steps.sdk-cache.outputs.cache-matched-key == ''
       uses: actions/cache/save@v6.1.0
       with:
         path: ${{ runner.temp }}/dotnet-sdks
