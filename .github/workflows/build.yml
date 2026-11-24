@@ -70,7 +70,7 @@ jobs:
       
   build:
     runs-on: windows-latest
-    if: github.ref == 'refs/heads/master'
+    if: github.ref == 'refs/heads/master' && github.event.repository.fork == false
     needs: test
 
     steps:
