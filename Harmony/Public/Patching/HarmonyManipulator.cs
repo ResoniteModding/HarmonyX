@@ -208,7 +208,7 @@ public class HarmonyManipulator
 			var start = il.DeclareLabel();
 			il.MarkLabel(start);
 
-			EmitCallParameter(method, PatchCallSite.Prefix, out var tmpInstanceBoxingVar, out var tmpObjectVar, out var resultRefInvoke, out var tmpBoxVars);
+			EmitCallParameter(method, HarmonyPatchType.Prefix, out var tmpInstanceBoxingVar, out var tmpObjectVar, out var resultRefInvoke, out var tmpBoxVars);
 			il.Emit(OpCodes.Call, method);
 
 			if (!AccessTools.IsVoid(method.ReturnType))
@@ -609,7 +609,7 @@ public class HarmonyManipulator
 				var start = il.DeclareLabel();
 				il.MarkLabel(start);
 
-				EmitCallParameter(method, PatchCallSite.Finalizer, out var tmpInstanceBoxingVar, out var tmpObjectVar, out var resultRefInvoke, out var tmpBoxVars);
+				EmitCallParameter(method, HarmonyPatchType.Finalizer, out var tmpInstanceBoxingVar, out var tmpObjectVar, out var resultRefInvoke, out var tmpBoxVars);
 				il.Emit(OpCodes.Call, method);
 
 				if (finalizer.hasArgsArrayArg)
@@ -763,7 +763,7 @@ public class HarmonyManipulator
 			var start = il.DeclareLabel();
 			il.MarkLabel(start);
 
-			EmitCallParameter(method, PatchCallSite.Postfix, out var tmpInstanceBoxingVar, out var tmpObjectVar, out var resultRefInvoke, out var tmpBoxVars);
+			EmitCallParameter(method, HarmonyPatchType.Postfix, out var tmpInstanceBoxingVar, out var tmpObjectVar, out var resultRefInvoke, out var tmpBoxVars);
 			il.Emit(OpCodes.Call, method);
 
 			if (postfix.hasArgsArrayArg)
@@ -799,7 +799,7 @@ public class HarmonyManipulator
 			if (postfix.wrapTryCatch)
 				il.Emit(OpCodes.Ldloc, returnValueVar);
 
-			EmitCallParameter(method, PatchCallSite.Postfix, out var tmpInstanceBoxingVar, out var tmpObjectVar, out var resultRefInvoke, out var tmpBoxVars);
+			EmitCallParameter(method, HarmonyPatchType.Postfix, out var tmpInstanceBoxingVar, out var tmpObjectVar, out var resultRefInvoke, out var tmpBoxVars);
 			il.Emit(OpCodes.Call, method);
 
 			if (postfix.hasArgsArrayArg)
@@ -929,15 +929,8 @@ public class HarmonyManipulator
 		}
 	}
 
-	private enum PatchCallSite
-	{
-		Prefix,
-		Postfix,
-		Finalizer
-	}
-
 	private void EmitCallParameter(MethodInfo patch,
-		PatchCallSite site,
+		HarmonyPatchType site,
 		out VariableDefinition tmpInstanceBoxingVar,
 		out VariableDefinition tmpObjectVar,
 		out MethodInfo resultRefInvoke,
@@ -954,7 +947,7 @@ public class HarmonyManipulator
 		var originalType = original.DeclaringType;
 
 		// check for passthrough using first parameter (which must have same type as return type)
-		var allowPassthrough = site == PatchCallSite.Postfix;
+		var allowPassthrough = site == HarmonyPatchType.Postfix;
 		var passthroughType = patch.ReturnType;
 		if (allowPassthrough && patch.ReturnType != typeof(void) && parametersWithRealNames.Count > 0 &&
 		    parametersWithRealNames[0].param.ParameterType == passthroughType)
@@ -1082,7 +1075,7 @@ public class HarmonyManipulator
 				if (AccessTools.IsRuntimeAsync(original) &&
 				    AccessTools.GetAwaitableType(parameterType, out var awaitableValueType) != AccessTools.AwaitableType.None)
 				{
-					if (site == PatchCallSite.Prefix)
+					if (site == HarmonyPatchType.Prefix)
 					{
 						if (!patchParam.ParameterType.IsByRef)
 							throw new InvalidHarmonyPatchArgumentException(
