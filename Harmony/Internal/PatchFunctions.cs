@@ -31,19 +31,12 @@ namespace HarmonyLib
 			if (!AccessTools.IsRuntimeAsync(original)) return;
 
 			ValidateRuntimeAsyncPrefix(original, prefix);
-			ValidateRuntimeAsyncResult(original, prefix?.method, PatchRole.Prefix);
-			ValidateRuntimeAsyncResult(original, postfix?.method, PatchRole.Postfix);
-			ValidateRuntimeAsyncResult(original, finalizer?.method, PatchRole.Finalizer);
+			ValidateRuntimeAsyncResult(original, prefix?.method, HarmonyPatchType.Prefix);
+			ValidateRuntimeAsyncResult(original, postfix?.method, HarmonyPatchType.Postfix);
+			ValidateRuntimeAsyncResult(original, finalizer?.method, HarmonyPatchType.Finalizer);
 		}
 
-		enum PatchRole
-		{
-			Prefix,
-			Postfix,
-			Finalizer
-		}
-
-		static void ValidateRuntimeAsyncResult(MethodBase original, MethodInfo method, PatchRole role)
+		static void ValidateRuntimeAsyncResult(MethodBase original, MethodInfo method, HarmonyPatchType role)
 		{
 			if (method is null) return;
 
@@ -57,7 +50,7 @@ namespace HarmonyLib
 					: parameter.ParameterType;
 				if (AccessTools.GetAwaitableType(parameterType, out var valueType) == AccessTools.AwaitableType.None) continue;
 
-				if (role == PatchRole.Prefix)
+				if (role == HarmonyPatchType.Prefix)
 				{
 					if (!parameter.ParameterType.IsByRef)
 						throw new InvalidHarmonyPatchArgumentException(
