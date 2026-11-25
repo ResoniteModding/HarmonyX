@@ -20,21 +20,67 @@ namespace HarmonyLib
 	/// <summary>Patch function helpers</summary>
 	internal static class PatchFunctions
 	{
-		/// <summary>Refuses __result parameters that a runtime-async method cannot supply</summary>
+		/// <summary>Refuses runtime-async patch signatures that cannot exchange a result</summary>
 		/// <param name="original">Method to be patched</param>
-		/// <param name="prefix">Prefix patch</param>
-		/// <param name="postfix">Postfix patch</param>
-		/// <param name="finalizer">Finalizer patch</param>
+		/// <param name="prefixes">Prefix patches</param>
+		/// <param name="postfixes">Postfix patches</param>
+		/// <param name="finalizers">Finalizer patches</param>
+		/// <param name="includeRegisteredPrefixes">Also compare against prefixes already registered on the original</param>
 		///
-		internal static void ValidateRuntimeAsyncResults(MethodBase original, HarmonyMethod prefix, HarmonyMethod postfix, HarmonyMethod finalizer)
+		internal static void ValidateRuntimeAsyncResults(MethodBase original, IEnumerable<MethodInfo> prefixes, IEnumerable<MethodInfo> postfixes, IEnumerable<MethodInfo> finalizers, bool includeRegisteredPrefixes = true)
 		{
 			if (!AccessTools.IsRuntimeAsync(original)) return;
 
-			ValidateRuntimeAsyncPrefix(original, prefix);
-			ValidateRuntimeAsyncResult(original, prefix?.method, HarmonyPatchType.Prefix);
-			ValidateRuntimeAsyncResult(original, postfix?.method, HarmonyPatchType.Postfix);
-			ValidateRuntimeAsyncResult(original, finalizer?.method, HarmonyPatchType.Finalizer);
+			var newPrefixes = prefixes is null ? new MethodInfo[0] : prefixes.Where(prefix => prefix is not null).ToArray();
+			foreach (var prefix in newPrefixes)
+			{
+				ValidateRuntimeAsyncPrefix(original, prefix);
+				ValidateRuntimeAsyncResult(original, prefix, HarmonyPatchType.Prefix);
+			}
+
+			var allPrefixes = includeRegisteredPrefixes
+				? (original.GetPatchInfo()?.prefixes.Select(patch => patch.PatchMethod) ?? Enumerable.Empty<MethodInfo>()).Concat(newPrefixes)
+				: newPrefixes;
+			GetRuntimeAsyncResultChannelType(original, allPrefixes);
+
+			foreach (var postfix in postfixes ?? Enumerable.Empty<MethodInfo>())
+				ValidateRuntimeAsyncResult(original, postfix, HarmonyPatchType.Postfix);
+			foreach (var finalizer in finalizers ?? Enumerable.Empty<MethodInfo>())
+				ValidateRuntimeAsyncResult(original, finalizer, HarmonyPatchType.Finalizer);
 		}
+
+		/// <summary>Gets the awaitable __result channel shared by all prefixes, rejecting conflicting types</summary>
+		/// <param name="original">Method to be patched</param>
+		/// <param name="prefixes">Prefix patches to inspect</param>
+		/// <returns>The awaitable type used as the shared __result channel, or null when no prefix declares one</returns>
+		///
+		static Type GetRuntimeAsyncResultChannelType(MethodBase original, IEnumerable<MethodInfo> prefixes)
+		{
+			Type channelType = null;
+			MethodInfo channelPatch = null;
+			foreach (var prefix in prefixes)
+			{
+				if (prefix is null) continue;
+
+				var resultParameter = prefix.GetParameters().FirstOrDefault(parameter => parameter.Name == "__result");
+				if (resultParameter is null) continue;
+
+				var parameterType = resultParameter.ParameterType.IsByRef
+					? resultParameter.ParameterType.GetElementType()
+					: resultParameter.ParameterType;
+				if (AccessTools.GetAwaitableType(parameterType, out _) == AccessTools.AwaitableType.None) continue;
+
+				if (channelType is not null && channelType.FullName != parameterType.FullName)
+					throw new InvalidHarmonyPatchArgumentException(
+						$"Prefix {prefix.FullDescription()} declares {parameterType.FullName} __result, but prefix {channelPatch.FullDescription()} declares {channelType.FullName} __result",
+						original, prefix);
+
+				channelType = parameterType;
+				channelPatch = prefix;
+			}
+			return channelType;
+		}
+
 
 		static void ValidateRuntimeAsyncResult(MethodBase original, MethodInfo method, HarmonyPatchType role)
 		{
@@ -79,9 +125,8 @@ namespace HarmonyLib
 			}
 		}
 
-		static void ValidateRuntimeAsyncPrefix(MethodBase original, HarmonyMethod prefix)
+		static void ValidateRuntimeAsyncPrefix(MethodBase original, MethodInfo method)
 		{
-			var method = prefix?.method;
 			if (method is null) return;
 			if (AccessTools.GetAwaitableType(method.ReturnType, out _) == AccessTools.AwaitableType.None) return;
 

@@ -1,4 +1,5 @@
 ﻿using HarmonyLib;
+using HarmonyLib.Public.Patching;
 using HarmonyTests.Patching.Assets;
 using NUnit.Framework;
 using System;
@@ -61,6 +62,38 @@ public class NativeDetourPatches : TestLogger
 		Assert.AreEqual(internedStr1, string.IsInterned(str1));
 		Assert.AreEqual(internedStr2, string.IsInterned(str2));
 	}
+
+#if NET11_0_OR_GREATER
+	[Test]
+	public void Test_PatchInstanceMethod_WithForcedNativeDetour()
+	{
+		var target = AccessTools.Method(typeof(NativeDetourInstanceTarget), nameof(NativeDetourInstanceTarget.Add));
+		EventHandler<PatchManager.PatcherResolverEventArgs> resolver = (sender, args) =>
+		{
+			if (args.Original == target)
+				args.MethodPatcher = new NativeDetourMethodPatcher(args.Original);
+		};
+		PatchManager.ResolvePatcher += resolver;
+
+		var instance = new Harmony("test-patch-instance-native-detour");
+		var targetInstance = new NativeDetourInstanceTarget();
+		NativeDetourInstanceTargetPatch.Seen = null;
+		try
+		{
+			instance.Patch(target, postfix: AccessTools.Method(typeof(NativeDetourInstanceTargetPatch), nameof(NativeDetourInstanceTargetPatch.Postfix)));
+
+			Assert.AreEqual(16, targetInstance.Add(5));
+			Assert.AreSame(targetInstance, NativeDetourInstanceTargetPatch.Seen);
+		}
+		finally
+		{
+			instance.UnpatchSelf();
+			PatchManager.ResolvePatcher -= resolver;
+		}
+
+		Assert.AreEqual(6, targetInstance.Add(5));
+	}
+#endif
 
 	[Test]
 	public void Test_PatchStaticExternalMethod()

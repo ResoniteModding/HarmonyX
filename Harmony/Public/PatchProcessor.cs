@@ -152,7 +152,10 @@ namespace HarmonyLib
 
 			lock (locker)
 			{
-				PatchFunctions.ValidateRuntimeAsyncResults(original, prefix, postfix, finalizer);
+				PatchFunctions.ValidateRuntimeAsyncResults(original,
+					prefix?.method is null ? new MethodInfo[0] : new[] { prefix.method },
+					postfix?.method is null ? new MethodInfo[0] : new[] { postfix.method },
+					finalizer?.method is null ? new MethodInfo[0] : new[] { finalizer.method });
 
 				var patchInfo = original.ToPatchInfo();
 

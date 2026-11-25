@@ -113,7 +113,7 @@ namespace HarmonyLibTests.Patching
 			}
 		}
 
-				[Test]
+		[Test]
 		public void Test_GenericSyncMethod_DummyDetour()
 		{
 			var target = AccessTools.Method(typeof(AsyncTargets), nameof(AsyncTargets.EchoSync)).MakeGenericMethod(typeof(int));
@@ -196,7 +196,7 @@ namespace HarmonyLibTests.Patching
 			}
 		}
 
-				[Test]
+		[Test]
 		public void Test_MethodTypeAsync_OnRuntimeAsync_IsRejected()
 		{
 			var instance = new Harmony("test.async.methodtype.reject");
@@ -207,7 +207,7 @@ namespace HarmonyLibTests.Patching
 			StringAssert.Contains("no state machine", exception.InnerException.Message);
 		}
 
-												[Test]
+		[Test]
 		public void Test_AsyncInvalidResultPrefix_OnVoidPatchAll_RejectedBeforeRegistration()
 		{
 			var target = AccessTools.Method(typeof(AsyncPrefixTargets), nameof(AsyncPrefixTargets.DoRejectAsync));
@@ -300,6 +300,84 @@ namespace HarmonyLibTests.Patching
 		}
 
 		[Test]
+		public void Test_ConflictingAwaitablePrefixResults_RejectedBeforeRegistration()
+		{
+			AsyncTargets.Reset();
+			var target = AccessTools.Method(typeof(AsyncTargets), nameof(AsyncTargets.SumAsync));
+			var first = AccessTools.Method(typeof(AsyncRefTaskPrefix), nameof(AsyncRefTaskPrefix.Prefix));
+			var second = AccessTools.Method(typeof(AsyncRefValueTaskOnTaskPrefix), nameof(AsyncRefValueTaskOnTaskPrefix.Prefix));
+			var instance = new Harmony("test.async.conflict");
+			try
+			{
+				instance.Patch(target, prefix: new HarmonyMethod(first));
+
+				var exception = Assert.Throws<InvalidHarmonyPatchArgumentException>(() =>
+					instance.Patch(target, prefix: new HarmonyMethod(second)));
+
+				StringAssert.Contains("__result", exception.Message);
+				var registered = Harmony.GetPatchInfo(target)?.Prefixes.Select(p => p.PatchMethod).ToArray() ?? [];
+				CollectionAssert.DoesNotContain(registered, second);
+				Assert.AreEqual(100, AsyncTargets.SumAsync(2, 3).GetAwaiter().GetResult());
+			}
+			finally
+			{
+				instance.UnpatchSelf();
+			}
+		}
+
+		[Test]
+		public void Test_UnassignedAwaitablePrefix_DefaultsResultWhenSkipped()
+		{
+			AsyncTargets.Reset();
+			var target = AccessTools.Method(typeof(AsyncTargets), nameof(AsyncTargets.SumAsync));
+			var instance = new Harmony("test.async.unassigned");
+			try
+			{
+				instance.Patch(target, prefix: new HarmonyMethod(AccessTools.Method(typeof(AsyncRefTaskUnassignedPrefix), nameof(AsyncRefTaskUnassignedPrefix.Prefix))));
+				instance.Patch(target, prefix: new HarmonyMethod(AccessTools.Method(typeof(AsyncSkipPrefix), nameof(AsyncSkipPrefix.Prefix))));
+
+				Assert.AreEqual(0, AsyncTargets.SumAsync(2, 3).GetAwaiter().GetResult());
+			}
+			finally
+			{
+				instance.UnpatchSelf();
+			}
+		}
+
+		[Test]
+		public void Test_AsyncRefVoidValueTaskPrefix_AwaitsAndSkipsOriginal()
+		{
+			AsyncTargets.Reset();
+			var instance = new Harmony("test.async.refvoidvaluetask.skip");
+			try
+			{
+				instance.PatchAll(typeof(AsyncRefVoidValueTaskPrefix));
+
+				AsyncTargets.DoValueAsync().GetAwaiter().GetResult();
+
+				AssertEvents("prefix:valuetask");
+			}
+			finally
+			{
+				instance.UnpatchSelf();
+			}
+		}
+
+		[Test]
+		public void Test_AwaitableResultPostfix_OnPatchAll_RejectedBeforeRegistration()
+		{
+			var target = AccessTools.Method(typeof(AsyncTargets), nameof(AsyncTargets.SumAsync));
+			var postfix = AccessTools.Method(typeof(AsyncAwaitableResultPostfixPatch), nameof(AsyncAwaitableResultPostfixPatch.Postfix));
+
+			var exception = AssertRejected(() =>
+				new Harmony("test.async.awaitablepostfix.patchall").PatchAll(typeof(AsyncAwaitableResultPostfixPatch)));
+
+			StringAssert.Contains("do not materialize", exception.Message);
+			var registered = Harmony.GetPatchInfo(target)?.Postfixes.Select(p => p.PatchMethod).ToArray() ?? [];
+			CollectionAssert.DoesNotContain(registered, postfix);
+		}
+
+		[Test]
 		public void Test_AsyncRefBoolTaskPrefix_ReplacesBoolResult()
 		{
 			AsyncPrefixTargets.Reset();
@@ -317,7 +395,7 @@ namespace HarmonyLibTests.Patching
 			}
 		}
 
-				[Test]
+		[Test]
 		public void Test_AsyncRefTaskPrefix_BoxesResultForReferenceReturnType()
 		{
 			AsyncPrefixTargets.Reset();

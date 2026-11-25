@@ -34,6 +34,20 @@ namespace HarmonyLib
 	{
 		private static Type[] allTypesCached = null;
 
+		private const string TaskTypeName = "System.Threading.Tasks.Task";
+		private const string TaskOfTTypeName = "System.Threading.Tasks.Task`1";
+		private const string ValueTaskTypeName = "System.Threading.Tasks.ValueTask";
+		private const string ValueTaskOfTTypeName = "System.Threading.Tasks.ValueTask`1";
+
+		internal enum AwaitableType
+		{
+			None,
+			Task,
+			TaskOfT,
+			ValueTask,
+			ValueTaskOfT
+		}
+
 		/// <summary>Shortcut for <see cref="BindingFlags"/> to simplify the use of reflections and make it work for any access level</summary>
 		///
 		public static readonly BindingFlags all = BindingFlags.Public // This should be a const, but changing from static (readonly) to const breaks binary compatibility.
@@ -961,7 +975,7 @@ namespace HarmonyLib
 		/// <param name="method">Method to inspect</param>
 		/// <returns>True when the method implementation flags mark the method as runtime-async</returns>
 		///
-		public static bool IsRuntimeAsync(MethodBase method)
+		internal static bool IsRuntimeAsync(MethodBase method)
 		{
 			if (method is null || method is ConstructorInfo) return false;
 			try
@@ -969,24 +983,10 @@ namespace HarmonyLib
 				// MethodImplAttributes.Async does not exist in every target framework Harmony supports
 				return (method.GetMethodImplementationFlags() & (System.Reflection.MethodImplAttributes)RuntimeAsync.AsyncIl) != 0;
 			}
-			catch
+			catch (NotSupportedException)
 			{
 				return false;
 			}
-		}
-
-		private const string TaskTypeName = "System.Threading.Tasks.Task";
-		private const string TaskOfTTypeName = "System.Threading.Tasks.Task`1";
-		private const string ValueTaskTypeName = "System.Threading.Tasks.ValueTask";
-		private const string ValueTaskOfTTypeName = "System.Threading.Tasks.ValueTask`1";
-
-		internal enum AwaitableType
-		{
-			None,
-			Task,
-			TaskOfT,
-			ValueTask,
-			ValueTaskOfT
 		}
 
 		internal static AwaitableType GetAwaitableType(Type type, out Type resultType)

@@ -124,6 +124,12 @@ public class HarmonyManipulator
 		il = new ILEmitter(ctx.IL);
 		SortPatches();
 
+		PatchFunctions.ValidateRuntimeAsyncResults(original,
+			prefixes.Select(patch => patch.method),
+			postfixes.Select(patch => patch.method),
+			finalizers.Select(patch => patch.method),
+			includeRegisteredPrefixes: false);
+
 		Logger.Log(Logger.LogChannel.Info, () =>
 		{
 			var sb = new StringBuilder();
@@ -245,7 +251,23 @@ public class HarmonyManipulator
 			var noAwait = il.DeclareLabel();
 			il.Emit(OpCodes.Ldloc, runOriginal);
 			il.Emit(OpCodes.Brtrue, noAwait);
-			il.Emit(OpCodes.Ldloc, variables[AwaitableResultVar]);
+
+			if (awaitableResultType.IsValueType)
+			{
+				il.Emit(OpCodes.Ldloc, variables[AwaitableResultVar]);
+			}
+			else
+			{
+				// A prefix can skip without assigning a result; leave the default result instead of awaiting null
+				var hasAwaitable = il.DeclareLabel();
+				il.Emit(OpCodes.Ldloc, variables[AwaitableResultVar]);
+				il.Emit(OpCodes.Dup);
+				il.Emit(OpCodes.Brtrue, hasAwaitable);
+				il.Emit(OpCodes.Pop);
+				il.Emit(OpCodes.Br, noAwait);
+				il.MarkLabel(hasAwaitable);
+			}
+
 			EmitAwait(awaitableResultType, awaitableResultPatch);
 			if (awaitableResultValueType is not null)
 				EmitResultStore(awaitableResultValueType, returnValueVar);
@@ -707,15 +729,13 @@ public class HarmonyManipulator
 	{
 		var awaitMethod = AccessTools.GetAwaitableType(awaitableType, out var resultType) switch
 		{
-			AccessTools.AwaitableType.Task => MonoMod.Utils.RuntimeAsync.AwaitTask,
-			AccessTools.AwaitableType.TaskOfT => MonoMod.Utils.RuntimeAsync.AwaitTaskT.MakeGenericMethod(resultType),
-			AccessTools.AwaitableType.ValueTask => MonoMod.Utils.RuntimeAsync.AwaitValueTask,
-			AccessTools.AwaitableType.ValueTaskOfT => MonoMod.Utils.RuntimeAsync.AwaitValueTaskT.MakeGenericMethod(resultType),
-			_ => null
+			AccessTools.AwaitableType.Task => RuntimeAsync.AwaitTask,
+			AccessTools.AwaitableType.TaskOfT => RuntimeAsync.AwaitTaskT.MakeGenericMethod(resultType),
+			AccessTools.AwaitableType.ValueTask => RuntimeAsync.AwaitValueTask,
+			AccessTools.AwaitableType.ValueTaskOfT => RuntimeAsync.AwaitValueTaskT.MakeGenericMethod(resultType),
+			_ => throw new InvalidHarmonyPatchArgumentException(
+				$"Cannot await {awaitableType.FullName} of async patch {patch.FullDescription()}", original, patch)
 		};
-		if (awaitMethod is null)
-			throw new InvalidHarmonyPatchArgumentException(
-				$"Cannot await {awaitableType.FullName} of async patch {patch.FullDescription()}", original, patch);
 
 		il.Emit(OpCodes.Call, awaitMethod);
 	}
@@ -811,9 +831,8 @@ public class HarmonyManipulator
 			EmitArgUnbox(tmpBoxVars);
 
 			var firstParam = method.GetParameters().FirstOrDefault();
-			var returnedType = method.ReturnType;
 
-			if (firstParam == null || returnedType != firstParam.ParameterType)
+			if (firstParam == null || method.ReturnType != firstParam.ParameterType)
 			{
 				if (firstParam != null)
 					throw new InvalidHarmonyPatchArgumentException(
@@ -948,9 +967,8 @@ public class HarmonyManipulator
 
 		// check for passthrough using first parameter (which must have same type as return type)
 		var allowPassthrough = site == HarmonyPatchType.Postfix;
-		var passthroughType = patch.ReturnType;
 		if (allowPassthrough && patch.ReturnType != typeof(void) && parametersWithRealNames.Count > 0 &&
-		    parametersWithRealNames[0].param.ParameterType == passthroughType)
+		    parametersWithRealNames[0].param.ParameterType == patch.ReturnType)
 			parametersWithRealNames.RemoveRange(0, 1);
 
 		foreach (var patchParamWithRealName in parametersWithRealNames)
@@ -1075,47 +1093,19 @@ public class HarmonyManipulator
 				if (AccessTools.IsRuntimeAsync(original) &&
 				    AccessTools.GetAwaitableType(parameterType, out var awaitableValueType) != AccessTools.AwaitableType.None)
 				{
-					if (site == HarmonyPatchType.Prefix)
+					// Validation rejects awaitable __result on non-prefixes and conflicting prefix channel types
+					if (site != HarmonyPatchType.Prefix)
+						throw new InvalidOperationException($"Awaitable {ResultVar} on a {site} patch was not rejected by validation");
+
+					if (variables.TryGetValue(AwaitableResultVar, out var awaitableResultVar) is false)
 					{
-						if (!patchParam.ParameterType.IsByRef)
-							throw new InvalidHarmonyPatchArgumentException(
-								$"Prefix patch {patch.FullDescription()} declares {ResultVar} as {parameterType.FullName}; declare it as ref {parameterType.FullName} {ResultVar}",
-								original, patch);
-						if (returnType == typeof(void))
-						{
-							if (awaitableValueType is not null)
-								throw new InvalidHarmonyPatchArgumentException(
-									$"{original.FullDescription()} returns void; remove the {ResultVar} parameter from prefix {patch.FullDescription()}",
-									original, patch);
-						}
-						else if (awaitableValueType is null || !returnType.IsAssignableFrom(awaitableValueType))
-							throw new InvalidHarmonyPatchArgumentException(
-								$"Cannot assign {parameterType.FullName} to {ResultVar} of {original.FullDescription()}; declare ref Task<{returnType.FullName}> {ResultVar}",
-								original, patch);
-
-						if (variables.TryGetValue(AwaitableResultVar, out var awaitableResultVar))
-						{
-							if (awaitableResultVar.VariableType.FullName != parameterType.FullName)
-								throw new InvalidHarmonyPatchArgumentException(
-									$"Prefix {patch.FullDescription()} declares {parameterType.FullName} {ResultVar}, but another prefix declares {awaitableResultVar.VariableType.FullName} {ResultVar}",
-									original, patch);
-						}
-						else
-						{
-							awaitableResultVar = variables[AwaitableResultVar] = il.DeclareVariable(parameterType);
-							awaitableResultType = parameterType;
-							awaitableResultValueType = awaitableValueType;
-							awaitableResultPatch = patch;
-						}
-						il.Emit(OpCodes.Ldloca, awaitableResultVar);
-						continue;
+						awaitableResultVar = variables[AwaitableResultVar] = il.DeclareVariable(parameterType);
+						awaitableResultType = parameterType;
+						awaitableResultValueType = awaitableValueType;
+						awaitableResultPatch = patch;
 					}
-
-					throw new InvalidHarmonyPatchArgumentException(
-						returnType == typeof(void)
-							? $"Runtime-async methods do not materialize their {parameterType.FullName}; remove the {ResultVar} parameter"
-							: $"Runtime-async methods do not materialize their {parameterType.FullName}; declare {ResultVar} as {returnType.FullName}",
-						original, patch);
+					il.Emit(OpCodes.Ldloca, awaitableResultVar);
+					continue;
 				}
 				if (returnType == typeof(void))
 					throw new Exception($"Cannot get result from void method {original.FullDescription()}");

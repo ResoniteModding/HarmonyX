@@ -6,7 +6,7 @@ using TestLibrary;
 
 namespace HarmonyLibTests.Assets
 {
-		[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.SumAsync))]
+	[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.SumAsync))]
 	public static class AsyncValueResultPatch
 	{
 		public static void Postfix(int __result)
@@ -15,7 +15,7 @@ namespace HarmonyLibTests.Assets
 		}
 	}
 
-		[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.SumAsync))]
+	[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.SumAsync))]
 	public static class AsyncIntReturnPatch
 	{
 		public static int Postfix(int __result) => __result + 5;
@@ -28,7 +28,7 @@ namespace HarmonyLibTests.Assets
 		public static void Postfix(int __result) => InFlightTargets.Events.Add($"postfix:{__result}");
 	}
 
-					[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.SumAsync))]
+	[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.SumAsync))]
 	public static class AsyncRefTaskPrefix
 	{
 		public static bool Prefix(ref Task<int> __result)
@@ -81,20 +81,9 @@ namespace HarmonyLibTests.Assets
 		}
 	}
 
-	[HarmonyPatch(typeof(AsyncPrefixTargets), nameof(AsyncPrefixTargets.TryCheckAsync))]
-	public static class AsyncBoolControlPrefix
-	{
-		public static async Task<bool> Prefix()
-		{
-			AsyncPrefixTargets.Events.Add("prefix:start");
-			await Task.Yield();
-			AsyncPrefixTargets.Events.Add("prefix:end");
-			return false;
-		}
-	}
-
 	[HarmonyPatch(typeof(AsyncPrefixTargets), nameof(AsyncPrefixTargets.BoxAsync))]
-	public static class AsyncRefBoxedTaskPrefix	{
+	public static class AsyncRefBoxedTaskPrefix
+	{
 		public static bool Prefix(ref Task<int> __result)
 		{
 			AsyncPrefixTargets.Events.Add("prefix:ref");
@@ -148,6 +137,46 @@ namespace HarmonyLibTests.Assets
 			return 1;
 		}
 	}
+
+	[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.SumAsync))]
+	public static class AsyncRefValueTaskOnTaskPrefix
+	{
+		public static bool Prefix(ref ValueTask<int> __result)
+		{
+			__result = new ValueTask<int>(200);
+			return false;
+		}
+	}
+
+	[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.SumAsync))]
+	public static class AsyncRefTaskUnassignedPrefix
+	{
+		public static bool Prefix(ref Task<int> __result) => true;
+	}
+
+	[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.SumAsync))]
+	public static class AsyncSkipPrefix
+	{
+		public static bool Prefix() => false;
+	}
+
+	[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.SumAsync))]
+	public static class AsyncAwaitableResultPostfixPatch
+	{
+		public static void Postfix(ref Task<int> __result) { }
+	}
+
+	[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.DoValueAsync))]
+	public static class AsyncRefVoidValueTaskPrefix
+	{
+		public static bool Prefix(ref ValueTask __result)
+		{
+			AsyncTargets.Events.Add("prefix:valuetask");
+			__result = ValueTask.CompletedTask;
+			return false;
+		}
+	}
+
 #endif
 
 	[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.RefSumAsync))]
@@ -160,7 +189,7 @@ namespace HarmonyLibTests.Assets
 		}
 	}
 
-		[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.RefSumAsync))]
+	[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.RefSumAsync))]
 	public static class AsyncRefTaskOfTResultPatch
 	{
 		public static void Postfix(ref Task<int> __result)
@@ -185,7 +214,7 @@ namespace HarmonyLibTests.Assets
 	}
 
 #if NETCOREAPP
-			[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.RefSumValueAsync))]
+	[HarmonyPatch(typeof(AsyncTargets), nameof(AsyncTargets.RefSumValueAsync))]
 	public static class AsyncRefValueTaskOfTResultPatch
 	{
 		public static void Postfix(ref ValueTask<int> __result)

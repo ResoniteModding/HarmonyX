@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection.Emit;
+using System.Runtime.CompilerServices;
 
 namespace HarmonyTests.Patching.Assets;
 
@@ -75,3 +76,22 @@ public class ExternalStaticMethod_MathCos_Patch
 		return null;
 	}
 }
+
+#if NET11_0_OR_GREATER
+public class NativeDetourInstanceTarget
+{
+	[MethodImpl(MethodImplOptions.NoInlining)]
+	public int Add(int value) => value + 1;
+}
+
+public static class NativeDetourInstanceTargetPatch
+{
+	public static NativeDetourInstanceTarget Seen;
+
+	public static void Postfix(NativeDetourInstanceTarget __instance, ref int __result)
+	{
+		Seen = __instance;
+		__result += 10;
+	}
+}
+#endif
